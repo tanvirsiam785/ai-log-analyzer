@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local AI Log Analyzer</title>
+<style>
+:root { --bg:#f6f7f9; --card:#fff; --text:#1c2230; --muted:#667085; --line:#e3e6eb; --accent:#2563eb; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#12151c; --card:#1b2030; --text:#e8ebf2; --muted:#98a2b3; --line:#2b3248; --accent:#5b8cff; }
+}
+* { box-sizing: border-box; }
+body { margin:0; font-family: system-ui, Segoe UI, sans-serif; background:var(--bg); color:var(--text); }
+main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; font-size: 14px; cursor: pointer; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+input[type=file] { font-size: 14px; }
+.bar { height: 12px; background: var(--line); border-radius: 8px; overflow: hidden; margin: 12px 0 8px; }
+.fill { height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.stats { display: flex; gap: 24px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+.stats b { color: var(--text); }
+.msg { margin-top: 8px; font-size: 14px; }
+.err { color: #d92d20; }
+.scroll { overflow-x: auto; max-height: 340px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--card); }
+.sev { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
+.Critical { background: #b42318; } .High { background: #e8590c; } .Medium { background: #ca8a04; } .Low { background: #2f855a; }
+.link { color: #b42318; font-weight: 600; }
+.small { color: var(--muted); font-size: 12px; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Local AI Log Analyzer</h1>
+  <div class="sub">Runs a small local model on a log larger than its context window. Nothing leaves this machine.</div>
+
+  <div class="card">
+    <div class="row">
+      <input type="file" id="file" accept=".log,.txt">
+      <button id="upload">Upload</button>
+      <button id="start" disabled>Start / Resume</button>
+      <a id="download" href="/report" style="display:none">Download report.json</a>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><b id="state">idle</b><span class="small" id="fname"></span></div>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <div class="stats">
+      <span>Chunks <b id="done">0</b> / <b id="total">0</b></span>
+      <span>Failed <b id="failed">0</b></span>
+      <span>RAM <b id="ram">0</b> MB</span>
+      <span>Avg model call <b id="avg">-</b></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Final report</b>
+    <div class="scroll" style="max-height:none">
+      <table>
+        <thead><tr><th>Severity</th><th>Type</th><th>IP</th><th>Evidence lines</th><th>Why</th><th>Action</th><th>Chunks</th></tr></thead>
+        <tbody id="report"></tbody>
+      </table>
+    </div>
+    <div class="small" id="empty">The report appears when the analysis finishes.</div>
+  </div>
+
+  <div class="card">
+    <b>Chunks</b>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>#</th><th>Lines</th><th>Status</th><th>Time</th><th>Accepted</th><th>Rejected</th><th>Notes</th></tr></thead>
+        <tbody id="chunks"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+
+function cell(row, text, cls) {
+  const td = document.createElement("td");
+  if (cls) td.className = cls;
+  td.textContent = text;
+  row.appendChild(td);
+  return td;
+}
+
+function setMessage(text, bad) {
+  $("msg").textContent = text;
+  $("msg").className = "msg" + (bad ? " err" : "");
+}
+
+function render(d) {
+  const running = d.state === "running";
+  $("state").textContent = d.state + (d.message ? " - " + d.message : "");
+  $("fname").textContent = d.uploaded ? d.name : "no file uploaded";
+  $("done").textContent = d.done;
+  $("total").textContent = d.total;
+  $("failed").textContent = d.failed;
+  $("ram").textContent = d.ram_mb;
+  $("fill").style.width = d.total ? Math.round(100 * d.done / d.total) + "%" : "0";
+  $("start").disabled = running || !d.uploaded;
+  $("upload").disabled = running;
+  $("file").disabled = running;
+  $("download").style.display = d.state === "done" ? "inline" : "none";
+  if (d.state === "error") setMessage(d.message, true);
+
+  const timed = d.chunks.filter(c => !c.resumed && typeof c.seconds === "number");
+  $("avg").textContent = timed.length
+    ? (timed.reduce((s, c) => s + c.seconds, 0) / timed.length).toFixed(1) + " s"
+    : "-";
+
+  const body = $("chunks");
+  body.textContent = "";
+  d.chunks.forEach(c => {
+    const tr = document.createElement("tr");
+    cell(tr, c.chunk);
+    cell(tr, c.start + "-" + c.end);
+    cell(tr, c.status, c.status === "ok" ? "" : "err");
+    cell(tr, c.resumed ? "resumed" : (c.seconds === null ? "-" : c.seconds + " s"));
+    cell(tr, c.accepted);
+    cell(tr, c.rejected);
+    cell(tr, c.errors.join("; "));
+    body.appendChild(tr);
+  });
+
+  const rep = $("report");
+  rep.textContent = "";
+  d.report.forEach(r => {
+    const tr = document.createElement("tr");
+    const sev = cell(tr, "");
+    const badge = document.createElement("span");
+    badge.className = "sev " + r.severity;
+    badge.textContent = r.severity;
+    sev.appendChild(badge);
+    cell(tr, r.type);
+    cell(tr, r.ip);
+    cell(tr, r.lines.join(", "));
+    const why = cell(tr, r.evidence);
+    if (r.link) {
+      const note = document.createElement("div");
+      note.className = "link";
+      note.textContent = "Linked across parts: " + r.link;
+      why.appendChild(note);
+    }
+    if (r.model_reason) {
+      const note = document.createElement("div");
+      note.className = "small";
+      note.textContent = "Model: " + r.model_reason;
+      why.appendChild(note);
+    }
+    cell(tr, r.action);
+    cell(tr, r.chunks.join(", "));
+    rep.appendChild(tr);
+  });
+  $("empty").style.display = d.report.length ? "none" : "block";
+  if (d.state === "done" && !d.report.length) $("empty").textContent = "No attacks were confirmed.";
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("/progress");
+    render(await res.json());
+  } catch (e) {
+    setMessage("Cannot reach the server", true);
+  }
+}
+
+$("upload").onclick = async () => {
+  const f = $("file").files[0];
+  if (!f) { setMessage("Choose a .log or .txt file first", true); return; }
+  const form = new FormData();
+  form.append("file", f);
+  setMessage("Uploading...", false);
+  const res = await fetch("/upload", { method: "POST", body: form });
+  const body = await res.json();
+  if (!res.ok) { setMessage(body.detail || "Upload failed", true); return; }
+  setMessage("Uploaded " + body.name + " (" + Math.round(body.size / 1024) + " KB)", false);
+  refresh();
+};
+
+$("start").onclick = async () => {
+  const res = await fetch("/start", { method: "POST" });
+  const body = await res.json();
+  if (!res.ok) { setMessage(body.detail || "Could not start", true); return; }
+  setMessage("Analysis started", false);
+  refresh();
+};
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
