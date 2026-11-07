@@ -1,0 +1,126 @@
+[
+  {
+    "type": "brute_force",
+    "severity": "Critical",
+    "ip": "203.0.113.44",
+    "lines": [
+      5,
+      13,
+      23,
+      35,
+      50,
+      65,
+      80,
+      94,
+      108,
+      123
+    ],
+    "evidence": "12 denied logins out of 15 requests",
+    "model_reason": "Multiple denied logins (11) from the same IP within a short timeframe (08:02..09:42), indicating a brute force attack.",
+    "action": "Block 203.0.113.44 and investigate the account compromise associated with this IP.",
+    "chunks": [
+      1,
+      2,
+      3,
+      5,
+      7,
+      8,
+      10,
+      13,
+      14
+    ],
+    "reports": 9,
+    "reclassified": false,
+    "link": "successful login at line 196 after denied logins from line 5"
+  },
+  {
+    "type": "sql_injection",
+    "severity": "High",
+    "ip": "203.0.113.72",
+    "lines": [
+      29,
+      30,
+      222,
+      223
+    ],
+    "evidence": "4 requests with SQL syntax",
+    "model_reason": "model flagged this IP as rate_anomaly; the ledger supports sql_injection",
+    "action": "Block the IP, review the endpoint and use parameterized queries.",
+    "chunks": [
+      3,
+      20
+    ],
+    "reports": 2,
+    "reclassified": true
+  },
+  {
+    "type": "scanning",
+    "severity": "High",
+    "ip": "203.0.113.90",
+    "lines": [
+      54,
+      56,
+      58,
+      60,
+      62,
+      64,
+      67,
+      69,
+      99,
+      101,
+      102
+    ],
+    "evidence": "11 distinct paths, 11 of 11 requests failed",
+    "model_reason": "model flagged this IP as rate_anomaly, brute_force; the ledger supports scanning",
+    "action": "Block or rate limit the IP and review exposed paths.",
+    "chunks": [
+      5,
+      6,
+      9
+    ],
+    "reports": 4,
+    "reclassified": true
+  },
+  {
+    "type": "unauthorized_access",
+    "severity": "High",
+    "ip": "203.0.113.90",
+    "lines": [
+      54,
+      56,
+      67,
+      69,
+      99,
+      101,
+      102
+    ],
+    "evidence": "7 requests to protected paths or denied",
+    "model_reason": "model flagged this IP as rate_anomaly, brute_force; the ledger supports unauthorized_access",
+    "action": "Block the IP and check access rules on protected paths.",
+    "chunks": [
+      5,
+      6,
+      9
+    ],
+    "reports": 4,
+    "reclassified": true
+  },
+  {
+    "type": "rate_anomaly",
+    "severity": "Medium",
+    "ip": "203.0.113.155",
+    "lines": [
+      159,
+      160,
+      161
+    ],
+    "evidence": "peak 12 requests per minute, 9 rate-limited (429) responses, up to 135 requests in the server's window",
+    "model_reason": "Peak request rate of 124-127 requests within a 10-second window, exceeding the server's rate limit (rl429=1) and causing",
+    "action": "Investigate 203.0.113.155 for potential rate limiting abuse or automated scanning activity. Review 2",
+    "chunks": [
+      14
+    ],
+    "reports": 1,
+    "reclassified": false
+  }
+]

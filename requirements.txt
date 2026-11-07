@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-multipart
+psutil
+huggingface_hub
+llama-cpp-python==0.3.36
